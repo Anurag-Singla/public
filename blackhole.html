@@ -1,65 +1,98 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Black Hole Visualization</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Black Hole Interactive</title>
   <style>
-    body { margin: 0; overflow: hidden; background: black; }
-    canvas { display: block; }
+    body { margin: 0; font-family: Arial, sans-serif; background: #000; color: #fff; text-align: center; /* Center container */ }
+    .container {
+      position: relative;
+      width: 100%;
+      max-width: 800px; /* Image will scale down if viewport is smaller */
+      margin: 20px auto; /* Added some margin for better visibility and centering */
+      display: inline-block; /* To make container wrap image for centering text-align */
+    }
+    .blackhole-img {
+      width: 100%;
+      display: block;
+      border: 2px solid #333;
+    }
+    .hotspot {
+      position: absolute;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: red;
+      cursor: pointer;
+      border: 2px solid white;
+      box-sizing: border-box; /* Ensures border doesn't add to width/height */
+    }
+    .tooltip {
+      position: absolute;
+      background: rgba(0, 0, 0, 0.9);
+      color: #fff;
+      padding: 10px;
+      border: 1px solid #888;
+      border-radius: 5px;
+      display: none;
+      max-width: 250px;
+      z-index: 10; /* Ensure tooltip is above hotspots */
+      text-align: left; /* Align text in tooltip to the left */
+    }
   </style>
 </head>
 <body>
-  <script src="https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/three@0.161.0/examples/js/controls/OrbitControls.js"></script>
+  <h2>Click on the red hotspots to learn more!</h2>
+  <div class="container">
+    <img src="https://anurag-singla.github.io/public/blackhole.jpeg" alt="Black Hole" class="blackhole-img">
+
+    <div class="hotspot" style="top: 38%; left: 48.5%;" onclick="showTooltip(event, 'Event Horizon: The point of no return. Nothing, not even light, can escape beyond this boundary once it crosses it.')"></div>
+    <div class="hotspot" style="top: 49%; left: 30%;" onclick="showTooltip(event, 'Accretion Disk: A disk-like flow of gas, plasma, dust, or stars orbiting the black hole. Friction causes the material to heat up and emit radiation.')"></div>
+    <div class="hotspot" style="top: 48.5%; left: 48.5%;" onclick="showTooltip(event, 'Singularity: The theorized one-dimensional point at the very center of a black hole where gravity is infinitely strong and spacetime curvature is infinite.')"></div>
+
+    <div id="tooltip" class="tooltip"></div>
+  </div>
+
   <script>
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+    const tooltip = document.getElementById('tooltip');
+    const container = document.querySelector('.container'); // Get the container element
 
-    const renderer = new THREE.WebGLRenderer();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    document.body.appendChild(renderer.domElement);
+    function showTooltip(event, text) {
+      event.stopPropagation(); // Prevent the click from bubbling up to the body
+      tooltip.innerHTML = text; // Use innerHTML if your text might contain HTML, else innerText is fine
 
-    // Create black hole (event horizon)
-    const blackHoleGeometry = new THREE.SphereGeometry(1, 64, 64);
-    const blackHoleMaterial = new THREE.MeshBasicMaterial({ color: 0x000000 });
-    const blackHole = new THREE.Mesh(blackHoleGeometry, blackHoleMaterial);
-    scene.add(blackHole);
+      const containerRect = container.getBoundingClientRect();
 
-    // Accretion disk (flattened torus)
-    const diskGeometry = new THREE.TorusGeometry(2.5, 0.3, 16, 100);
-    const diskMaterial = new THREE.MeshBasicMaterial({ color: 0xff6600 });
-    const disk = new THREE.Mesh(diskGeometry, diskMaterial);
-    disk.rotation.x = Math.PI / 2;
-    scene.add(disk);
+      let x = event.clientX - containerRect.left + 15; // Offset from cursor
+      let y = event.clientY - containerRect.top + 15;  // Offset from cursor
+      
+      tooltip.style.left = x + 'px';
+      tooltip.style.top = y + 'px';
+      tooltip.style.display = 'block'; // Show tooltip first to get its dimensions
 
-    // Glowing effect (halo)
-    const glowGeometry = new THREE.SphereGeometry(1.5, 32, 32);
-    const glowMaterial = new THREE.MeshBasicMaterial({ color: 0xffffaa, transparent: true, opacity: 0.1 });
-    const glow = new THREE.Mesh(glowGeometry, glowMaterial);
-    scene.add(glow);
-
-    // Lighting (subtle ambient light)
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.2);
-    scene.add(ambientLight);
-
-    // Camera controls
-    const controls = new THREE.OrbitControls(camera, renderer.domElement);
-    camera.position.z = 8;
-
-    // Animation loop
-    function animate() {
-      requestAnimationFrame(animate);
-      disk.rotation.z += 0.005;
-      renderer.render(scene, camera);
+      // Adjust if tooltip goes out of container's right boundary
+      // Ensure tooltip.offsetWidth is measured after it's displayed and content is set
+      if (x + tooltip.offsetWidth > containerRect.width) {
+        tooltip.style.left = (event.clientX - containerRect.left - tooltip.offsetWidth - 15) + 'px';
+      }
+      // Adjust if tooltip goes out of container's bottom boundary
+      if (y + tooltip.offsetHeight > containerRect.height) {
+         tooltip.style.top = (event.clientY - containerRect.top - tooltip.offsetHeight - 15) + 'px';
+      }
+       // Adjust if tooltip goes out of container's left boundary (when shifted)
+      if (parseFloat(tooltip.style.left) < 0) {
+          tooltip.style.left = '5px';
+      }
+      // Adjust if tooltip goes out of container's top boundary (when shifted)
+      if (parseFloat(tooltip.style.top) < 0) {
+          tooltip.style.top = '5px';
+      }
     }
-    animate();
 
-    // Handle window resize
-    window.addEventListener('resize', () => {
-      camera.aspect = window.innerWidth / window.innerHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
+    // Hide tooltip if clicked anywhere on the body
+    document.body.addEventListener('click', () => {
+      tooltip.style.display = 'none';
     });
   </script>
 </body>
