@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive 2D Black Hole Simulation</title>
+    <link href="https://fonts.googleapis.com/css2?family=Monospace&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Monospace', monospace;
+            margin: 0;
+            background-color: #000000; /* Deep space black */
+            color: #ffffff;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            overflow: hidden; /* Prevent scrollbars from canvas extending */
+        }
+        #simulationCanvas {
+            border: 1px solid #333; /* Subtle border */
+            background-color: #0a0a0a; /* Slightly lighter black for canvas */
+            display: block; /* Remove extra space below canvas */
+            box-shadow: 0 0 20px rgba(0, 191, 255, 0.3); /* Deep sky blue glow */
+        }
+        .controls {
+            padding: 15px;
+            background-color: rgba(10, 10, 10, 0.8);
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 0 10px rgba(0, 191, 255, 0.2);
+        }
+        .controls label, .controls button, .controls input {
+            margin: 5px;
+            font-size: 14px;
+        }
+        .controls button {
+            background-color: #007bff; /* Blue button */
+            color: white;
+            border: none;
+            padding: 8px 15px;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+        .controls button:hover {
+            background-color: #0056b3; /* Darker blue on hover */
+        }
+        .controls input[type="range"] {
+            vertical-align: middle;
+        }
+        .info-text {
+            margin-top: 10px;
+            font-size: 0.9em;
+            color: #aaa;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white flex flex-col items-center justify-center min-h-screen p-4">
+
+    <div class="controls bg-gray-800 p-4 rounded-lg shadow-xl mb-4 text-center">
+        <h1 class="text-2xl font-bold mb-4 text-cyan-400">Black Hole Simulator</h1>
+        <div>
+            <label for="bhMassSlider">Black Hole Mass: </label>
+            <input type="range" id="bhMassSlider" min="50" max="500" value="150" class="align-middle">
+            <span id="bhMassValue">150</span>
+        </div>
+        <div>
+            <label for="particleCountSlider">Initial Particles: </label>
+            <input type="range" id="particleCountSlider" min="10" max="300" value="100" class="align-middle">
+            <span id="particleCountValue">100</span>
+        </div>
+        <button id="resetButton" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg mt-2 transition-all duration-300 ease-in-out transform hover:scale-105 shadow-md">
+            Reset Simulation
+        </button>
+        <p class="info-text text-gray-400 mt-2 text-sm">Click on the canvas to add more particles!</p>
+    </div>
+
+    <canvas id="simulationCanvas"></canvas>
+
+    <script>
+        // Get canvas and context
+        const canvas = document.getElementById('simulationCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // DOM Elements for controls
+        const massSlider = document.getElementById('bhMassSlider');
+        const massValueDisplay = document.getElementById('bhMassValue');
+        const particleSlider = document.getElementById('particleCountSlider');
+        const particleCountDisplay = document.getElementById('particleCountValue');
+        const resetButton = document.getElementById('resetButton');
+
+        // --- Configuration ---
+        let G = 0.5; // Gravitational constant (scaled for simulation)
+        const PARTICLE_RADIUS = 2;
+        const MIN_SPAWN_DISTANCE_FACTOR = 1.5; // Spawn particles at least this factor times event horizon radius away
+        const MAX_PARTICLE_SPEED = 2; // Max initial speed for particles
+
+        // --- Global State ---
+        let blackHole;
+        let particles = [];
+        let animationFrameId;
+
+        // --- Utility Functions ---
+        function random(min, max) {
+            return Math.random() * (max - min) + min;
+        }
+
+        function distance(x1, y1, x2, y2) {
+            const dx = x2 - x1;
+            const dy = y2 - y1;
+            return Math.sqrt(dx * dx + dy * dy);
+        }
+
+        // --- BlackHole Class ---
+        class BlackHole {
+            constructor(x, y, mass) {
+                this.x = x;
+                this.y = y;
+                this.mass = mass;
+                // Schwarzschild radius: Rs = 2GM/c^2. For simulation, c=1, G is our G.
+                // We'll scale it for visual appeal.
+                this.eventHorizonRadius = this.mass * 0.1; // Adjusted for better visualization
+                this.accretionDiskOuterRadius = this.eventHorizonRadius * 2.5;
+                this.accretionDiskInnerRadius = this.eventHorizonRadius * 1.2;
+            }
+
+            draw() {
+                // Accretion Disk (stylized)
+                // Outer, hotter, brighter part
+                const gradientOuter = ctx.createRadialGradient(this.x, this.y, this.eventHorizonRadius, this.x, this.y, this.accretionDiskOuterRadius);
+                gradientOuter.addColorStop(0, 'rgba(255, 200, 0, 0)'); // Transparent near event horizon
+                gradientOuter.addColorStop(0.2, 'rgba(255, 180, 0, 0.1)');
+                gradientOuter.addColorStop(0.5, 'rgba(255, 150, 50, 0.3)');
+                gradientOuter.addColorStop(0.8, 'rgba(255, 100, 0, 0.2)');
+                gradientOuter.addColorStop(1, 'rgba(255, 69, 0, 0.05)'); // Fainter at the edge
+                ctx.fillStyle = gradientOuter;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.accretionDiskOuterRadius, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Inner, slightly less bright or different color part
+                const gradientInner = ctx.createRadialGradient(this.x, this.y, this.eventHorizonRadius, this.x, this.y, this.accretionDiskInnerRadius);
+                gradientInner.addColorStop(0, 'rgba(0,0,0,1)'); // Black hole center
+                gradientInner.addColorStop(0.3, 'rgba(255, 220, 100, 0.4)');
+                gradientInner.addColorStop(0.7, 'rgba(255, 180, 70, 0.6)');
+                gradientInner.addColorStop(1, 'rgba(255, 160, 0, 0.3)');
+                ctx.fillStyle = gradientInner;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.accretionDiskInnerRadius, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Event Horizon (the black circle)
+                ctx.fillStyle = 'black';
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.eventHorizonRadius, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Photon Sphere (subtle ring outside event horizon)
+                ctx.strokeStyle = 'rgba(200, 200, 200, 0.2)'; // Faint white
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.eventHorizonRadius * 1.1, 0, Math.PI * 2); // Slightly larger than event horizon
+                ctx.stroke();
+            }
+
+            // Method to update properties if mass changes
+            updateMass(newMass) {
+                this.mass = newMass;
+                this.eventHorizonRadius = this.mass * 0.1;
+                this.accretionDiskOuterRadius = this.eventHorizonRadius * 2.5;
+                this.accretionDiskInnerRadius = this.eventHorizonRadius * 1.2;
+            }
+        }
+
+        // --- Particle Class ---
+        class Particle {
+            constructor(x, y, vx = 0, vy = 0) {
+                this.x = x;
+                this.y = y;
+                this.vx = vx; // Velocity x
+                this.vy = vy; // Velocity y
+                this.radius = PARTICLE_RADIUS;
+                this.color = `hsl(${random(0, 360)}, 100%, 75%)`; // Random bright color
+                this.trail = []; // To store previous positions for a trail effect
+                this.trailLength = 5; // Number of points in the trail
+            }
+
+            update(bh) {
+                // Calculate distance and angle to black hole
+                const dx = bh.x - this.x;
+                const dy = bh.y - this.y;
+                const distSq = dx * dx + dy * dy;
+                const dist = Math.sqrt(distSq);
+
+                if (dist < 0.1) return; // Avoid division by zero if somehow at the exact center
+
+                // Calculate gravitational force: F = G * m1 * m2 / r^2
+                // Particle mass is considered 1 for simplicity here, so F = G * bh.mass / r^2
+                const forceMagnitude = (G * bh.mass) / distSq;
+
+                // Calculate acceleration: a = F / m (particle mass = 1)
+                const ax = (dx / dist) * forceMagnitude;
+                const ay = (dy / dist) * forceMagnitude;
+
+                // Update velocity
+                this.vx += ax;
+                this.vy += ay;
+
+                // Cap speed to prevent extreme velocities (optional, but good for stability)
+                const speed = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
+                if (speed > MAX_PARTICLE_SPEED * 2) { // Allow some burst but cap it
+                    this.vx = (this.vx / speed) * MAX_PARTICLE_SPEED * 2;
+                    this.vy = (this.vy / speed) * MAX_PARTICLE_SPEED * 2;
+                }
+
+                // Update position
+                this.x += this.vx;
+                this.y += this.vy;
+
+                // Add current position to trail
+                this.trail.push({ x: this.x, y: this.y });
+                if (this.trail.length > this.trailLength) {
+                    this.trail.shift(); // Remove oldest point
+                }
+            }
+
+            draw() {
+                // Draw trail
+                ctx.beginPath();
+                if (this.trail.length > 1) {
+                    ctx.moveTo(this.trail[0].x, this.trail[0].y);
+                    for (let i = 1; i < this.trail.length; i++) {
+                        const opacity = (i / this.trail.length) * 0.5; // Fade out trail
+                        ctx.strokeStyle = `rgba(${hexToRgb(this.color).r}, ${hexToRgb(this.color).g}, ${hexToRgb(this.color).b}, ${opacity})`;
+                        ctx.lineTo(this.trail[i].x, this.trail[i].y);
+                    }
+                    ctx.lineWidth = this.radius * 0.8;
+                    ctx.stroke();
+                }
+
+
+                // Draw particle
+                ctx.fillStyle = this.color;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+        // Helper to convert HSL to RGB for trail opacity (since HSL doesn't directly support alpha in canvas like RGBA)
+        function hexToRgb(hex) { // Actually handles HSL string from particle color
+            if (hex.startsWith('hsl')) {
+                let hsl = hex.substring(4, hex.length - 1).replace(/%/g, '').split(',');
+                let h = parseFloat(hsl[0]);
+                let s = parseFloat(hsl[1]) / 100;
+                let l = parseFloat(hsl[2]) / 100;
+
+                let c = (1 - Math.abs(2 * l - 1)) * s,
+                    x = c * (1 - Math.abs((h / 60) % 2 - 1)),
+                    m = l - c/2,
+                    r = 0,
+                    g = 0,
+                    b = 0;
+                if (0 <= h && h < 60) { r = c; g = x; b = 0; }
+                else if (60 <= h && h < 120) { r = x; g = c; b = 0; }
+                else if (120 <= h && h < 180) { r = 0; g = c; b = x; }
+                else if (180 <= h && h < 240) { r = 0; g = x; b = c; }
+                else if (240 <= h && h < 300) { r = x; g = 0; b = c; }
+                else if (300 <= h && h < 360) { r = c; g = 0; b = x; }
+                r = Math.round((r + m) * 255);
+                g = Math.round((g + m) * 255);
+                b = Math.round((b + m) * 255);
+                return { r, g, b };
+            }
+            return {r:255, g:255, b:255}; // Default white if format is unexpected
+        }
+
+
+        // --- Canvas Setup and Resize ---
+        function resizeCanvas() {
+            // Make canvas responsive, occupying a square portion of the smaller window dimension
+            const padding = 20; // Padding around the canvas
+            const controlsHeight = document.querySelector('.controls').offsetHeight + 30; // Approximate height of controls + margin
+            const availableWidth = window.innerWidth - 2 * padding;
+            const availableHeight = window.innerHeight - controlsHeight - 2 * padding;
+            
+            const size = Math.min(availableWidth, availableHeight, 700); // Max size of 700px
+
+            canvas.width = size;
+            canvas.height = size;
+
+            // Re-initialize simulation elements if blackHole exists (to recenter etc.)
+            if (blackHole) {
+                const currentMass = blackHole.mass;
+                const currentParticleCount = particles.length; // Or from slider if preferred
+                setupSimulation(currentMass, particleSlider.value); // Use slider value for particle count on resize
+            }
+        }
+
+
+        // --- Simulation Initialization ---
+        function setupSimulation(bhMass, numParticles) {
+            // Cancel any existing animation frame
+            if (animationFrameId) {
+                cancelAnimationFrame(animationFrameId);
+            }
+
+            // Create black hole at the center
+            blackHole = new BlackHole(canvas.width / 2, canvas.height / 2, parseFloat(bhMass));
+
+            // Create initial particles
+            particles = [];
+            for (let i = 0; i < numParticles; i++) {
+                createRandomParticle();
+            }
+            // Start the animation loop
+            animate();
+        }
+
+        function createRandomParticle(mouseX, mouseY) {
+            let x, y, vx = 0, vy = 0;
+            const angle = random(0, Math.PI * 2);
+            const baseSpawnRadius = blackHole.eventHorizonRadius * MIN_SPAWN_DISTANCE_FACTOR;
+            // Spawn further out, up to edge of canvas, ensuring not too close to BH
+            const spawnRadius = random(baseSpawnRadius + 50, Math.min(canvas.width / 2, canvas.height / 2) - PARTICLE_RADIUS * 2);
+
+
+            if (mouseX !== undefined && mouseY !== undefined) { // Particle from click
+                x = mouseX;
+                y = mouseY;
+                // Optional: give a slight outward velocity if clicked near BH, or random
+                 const dxToBh = blackHole.x - x;
+                 const dyToBh = blackHole.y - y;
+                 const distToBh = Math.sqrt(dxToBh*dxToBh + dyToBh*dyToBh);
+                 if (distToBh > 0) { // Avoid division by zero
+                    vx = -(dxToBh / distToBh) * random(0, MAX_PARTICLE_SPEED * 0.1); // Small push away from click point relative to BH
+                    vy = -(dyToBh / distToBh) * random(0, MAX_PARTICLE_SPEED * 0.1);
+                 }
+
+            } else { // Random initial particle
+                x = blackHole.x + Math.cos(angle) * spawnRadius;
+                y = blackHole.y + Math.sin(angle) * spawnRadius;
+                // Give particles some initial tangential velocity to encourage orbits
+                // Velocity perpendicular to the vector from black hole to particle
+                const speed = random(0.1, MAX_PARTICLE_SPEED * 0.5) * (1 - spawnRadius / (canvas.width/2)); // Slower if further out
+                vx = -Math.sin(angle) * speed * 0.5; // Reduced initial speed for more pull-in
+                vy = Math.cos(angle) * speed * 0.5;
+            }
+             // Ensure particle is not spawned inside event horizon
+            if (distance(x, y, blackHole.x, blackHole.y) < blackHole.eventHorizonRadius + PARTICLE_RADIUS) {
+                // If somehow inside, try again or place it further
+                if (mouseX === undefined) return createRandomParticle(); // Retry for initial particles
+                // For clicked particles, maybe just don't add or push it out
+                const moveOutAngle = Math.atan2(y - blackHole.y, x - blackHole.x);
+                x = blackHole.x + Math.cos(moveOutAngle) * (blackHole.eventHorizonRadius + PARTICLE_RADIUS + 5);
+                y = blackHole.y + Math.sin(moveOutAngle) * (blackHole.eventHorizonRadius + PARTICLE_RADIUS + 5);
+            }
+
+            particles.push(new Particle(x, y, vx, vy));
+        }
+
+
+        // --- Animation Loop ---
+        function animate() {
+            // Clear canvas with a slight fade effect for trails (optional)
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.2)'; // Semi-transparent black for motion blur
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Draw and update black hole
+            blackHole.draw();
+
+            // Update and draw particles
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.update(blackHole);
+                p.draw();
+
+                // Check for collision with event horizon
+                const distToBh = distance(p.x, p.y, blackHole.x, blackHole.y);
+                if (distToBh < blackHole.eventHorizonRadius) {
+                    particles.splice(i, 1); // Particle is consumed
+                    // Optional: add a visual effect for consumption
+                }
+                // Remove particles that go too far off screen
+                else if (p.x < -canvas.width || p.x > canvas.width * 2 || p.y < -canvas.height || p.y > canvas.height*2) {
+                     particles.splice(i, 1);
+                }
+            }
+
+            // Request next frame
+            animationFrameId = requestAnimationFrame(animate);
+        }
+
+        // --- Event Listeners ---
+        canvas.addEventListener('click', (event) => {
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = event.clientX - rect.left;
+            const mouseY = event.clientY - rect.top;
+            // Add a few particles at click location for a nice effect
+            for(let i=0; i<3; i++) {
+                createRandomParticle(mouseX + random(-5,5), mouseY + random(-5,5));
+            }
+        });
+
+        massSlider.addEventListener('input', (event) => {
+            const newMass = parseFloat(event.target.value);
+            massValueDisplay.textContent = newMass;
+            if (blackHole) {
+                blackHole.updateMass(newMass);
+            }
+        });
+
+        particleSlider.addEventListener('input', (event) => {
+            particleCountDisplay.textContent = event.target.value;
+            // Note: This only changes the display. Reset is needed to apply new initial particle count.
+        });
+
+        resetButton.addEventListener('click', () => {
+            const bhMass = parseFloat(massSlider.value);
+            const numParticles = parseInt(particleSlider.value);
+            setupSimulation(bhMass, numParticles);
+        });
+        
+        window.addEventListener('resize', resizeCanvas);
+
+        // --- Initial Setup Call ---
+        // Perform initial resize to set canvas dimensions correctly
+        resizeCanvas(); 
+        // Then setup the simulation with default or slider values
+        setupSimulation(massSlider.value, particleSlider.value);
+
+    </script>
+</body>
+</html>
